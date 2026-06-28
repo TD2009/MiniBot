@@ -1,32 +1,83 @@
 #include <WiFi.h>
-#include <WebSocketsServer.h>
 
-const char* ssid = "sweethome";
-const char* password = "Starlite$1812";
+const char* ssid = "WIFINAME";
+const char* password = "WIFIPASSWORD";
 
-WebSocketsServer webSocket(81);
+WiFiServer server(80);
+
+// TX only: GPIO17 -> Arduino D12
 HardwareSerial ArduinoSerial(1);
 
 const char webpage[] = R"rawliteral(
 <!DOCTYPE html>
 <html>
 <head>
-<title>Robot Control</title>
+<title>Robot Controller</title>
+
+<style>
+button {
+    width: 150px;
+    height: 80px;
+    font-size: 24px;
+    margin: 10px;
+}
+body {
+    text-align: center;
+    font-family: Arial;
+}
+</style>
+
 </head>
 <body>
+
 <h1>Robot Controller</h1>
 
-<button onclick="sendCmd('F')">Forward</button><br><br>
-<button onclick="sendCmd('L')">Left</button>
-<button onclick="sendCmd('R')">Right</button><br><br>
-<button onclick="sendCmd('B')">Backward</button><br><br>
-<button onclick="sendCmd('S')">STOP</button>
+<button
+onmousedown="sendCmd('F')"
+onmouseup="sendCmd('S')"
+ontouchstart="sendCmd('F')"
+ontouchend="sendCmd('S')">
+Forward
+</button>
+
+<br>
+
+<button
+onmousedown="sendCmd('L')"
+onmouseup="sendCmd('S')"
+ontouchstart="sendCmd('L')"
+ontouchend="sendCmd('S')">
+Left
+</button>
+
+<button
+onmousedown="sendCmd('R')"
+onmouseup="sendCmd('S')"
+ontouchstart="sendCmd('R')"
+ontouchend="sendCmd('S')">
+Right
+</button>
+
+<br>
+
+<button
+onmousedown="sendCmd('B')"
+onmouseup="sendCmd('S')"
+ontouchstart="sendCmd('B')"
+ontouchend="sendCmd('S')">
+Backward
+</button>
+
+<br><br>
+
+<button onclick="sendCmd('S')">
+STOP
+</button>
 
 <script>
-let ws = new WebSocket("ws://" + location.hostname + ":81");
-
 function sendCmd(cmd) {
-    ws.send(cmd);
+    fetch('/' + cmd)
+        .catch(err => console.log(err));
 }
 </script>
 
@@ -34,27 +85,13 @@ function sendCmd(cmd) {
 </html>
 )rawliteral";
 
-WiFiServer server(80);
-
-void onWebSocketEvent(uint8_t num,
-                      WStype_t type,
-                      uint8_t *payload,
-                      size_t length) {
-
-    if (type == WStype_TEXT && length > 0) {
-        char cmd = payload[0];
-
-        Serial.print("Sending to Arduino: ");
-        Serial.println(cmd);
-
-        ArduinoSerial.write(cmd);
-    }
-}
-
 void setup() {
+
     Serial.begin(115200);
 
     ArduinoSerial.begin(9600, SERIAL_8N1, -1, 17);
+
+    Serial.println("Connecting to WiFi...");
 
     WiFi.begin(ssid, password);
 
@@ -64,35 +101,62 @@ void setup() {
     }
 
     Serial.println();
-    Serial.print("IP: ");
+    Serial.println("Connected!");
+    Serial.print("IP Address: ");
     Serial.println(WiFi.localIP());
 
     server.begin();
 
-    webSocket.begin();
-    webSocket.onEvent(onWebSocketEvent);
+    Serial.println("Server started!");
 }
 
 void loop() {
-    webSocket.loop();
 
     WiFiClient client = server.available();
 
-    if (client) {
+    if (!client) return;
 
-        while (client.connected() && !client.available()) {
-            delay(1);
-        }
+    client.setTimeout(10);
 
-        while (client.available()) {
-            client.read();
-        }
+    String request = client.readStringUntil('\r');
 
-        client.println("HTTP/1.1 200 OK");
-        client.println("Content-Type: text/html");
-        client.println();
-        client.println(webpage);
+    Serial.println(request);
 
-        client.stop();
+    if (request.indexOf("GET /F") >= 0) {
+        ArduinoSerial.write('F');
+        Serial.println("Sent F");
     }
+    else if (request.indexOf("GET /B") >= 0) {
+        ArduinoSerial.write('B');
+        Serial.println("Sent B");
+    }
+    else if (request.indexOf("GET /L") >= 0) {
+        ArduinoSerial.write('L');
+        Serial.println("Sent L");
+    }
+    else if (request.indexOf("GET /R") >= 0) {
+        ArduinoSerial.write('R');
+        Serial.println("Sent R");
+    }
+    else if (request.indexOf("GET /S") >= 0) {
+        ArduinoSerial.write('S');
+        Serial.println("Sent S");
+    }
+
+    while (client.available()) {
+        client.read();
+    }
+
+    client.println("HTTP/1.1 200 OK");
+    client.println("Content-Type: text/html");
+    client.println();
+
+    if (request.indexOf("GET / ") >= 0) {
+        client.println(webpage);
+    }
+    else {
+        client.println("OK");
+    }
+
+    client.stop();
 }
